@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import time
+
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -10,7 +11,12 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+
 from google import genai
+
+# ==========================
+# CONFIG
+# ==========================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -41,6 +47,17 @@ CREATE TABLE IF NOT EXISTS memory(
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS media(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    media_type TEXT,
+    file_id TEXT,
+    caption TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
 db.commit()
 
 # ==========================
@@ -48,7 +65,7 @@ db.commit()
 # ==========================
 
 SYSTEM = """
-Kamu adalah HusnanAi V4.
+Kamu adalah HusnanAi V5.
 
 Owner:
 X: @husnan97
@@ -58,7 +75,7 @@ Instagram: @husnan.eth
 Karakter:
 - Ramah
 - Santai
-- Lucu jika diperlukan
+- Lucu
 - Ahli Crypto
 - Ahli Telegram Bot
 - Ahli Python
@@ -67,19 +84,19 @@ Jawab menggunakan bahasa Indonesia.
 """
 
 # ==========================
-# MEMORY FUNCTIONS
+# MEMORY
 # ==========================
 
 def save_memory(user_id, role, content):
     cursor.execute(
-        "INSERT INTO memory(user_id,role,content) VALUES(?,?,?)",
+        "INSERT INTO memory(user_id, role, content) VALUES (?, ?, ?)",
         (user_id, role, content)
     )
     db.commit()
 
 def get_memory(user_id, limit=10):
     cursor.execute("""
-        SELECT role,content
+        SELECT role, content
         FROM memory
         WHERE user_id=?
         ORDER BY rowid DESC
@@ -95,6 +112,13 @@ def get_memory(user_id, limit=10):
 
     return history
 
+def save_media(user_id, media_type, file_id, caption=""):
+    cursor.execute("""
+        INSERT INTO media(user_id, media_type, file_id, caption)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, media_type, file_id, caption))
+    db.commit()
+
 # ==========================
 # COMMANDS
 # ==========================
@@ -104,29 +128,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     cursor.execute("""
-    INSERT OR REPLACE INTO users(id,username)
-    VALUES(?,?)
+    INSERT OR REPLACE INTO users(id, username)
+    VALUES(?, ?)
     """, (user.id, user.username))
 
     db.commit()
 
     await update.message.reply_text(
         f"👋 Halo {user.first_name}\n\n"
-        "Saya HusnanAi V4.\n"
+        "Saya HusnanAi V5.\n"
         "Ketik apa saja untuk mulai ngobrol."
     )
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        """
-🤖 HusnanAi V4
-
-X : @husnan97
-Telegram : @Qomaroen
-Instagram : @husnan.eth
-
-Powered by Gemini AI
-        """
+        "🤖 HusnanAi V5\n\nPowered by Google Gemini"
     )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,12 +154,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_messages = cursor.fetchone()[0] or 0
 
     await update.message.reply_text(
-        f"""
-📊 Statistik
-
-👥 Users : {total_users}
-💬 Messages : {total_messages}
-        """
+        f"📊 Statistik\n\n👥 Users: {total_users}\n💬 Messages: {total_messages}"
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -158,23 +169,123 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.commit()
 
     await update.message.reply_text(
-        "🧠 Memori percakapan berhasil dihapus."
+        "🧠 Memori berhasil dihapus."
+    )
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+        """
+🤖 HusnanAi V5
+
+/start
+/about
+/stats
+/reset
+/menu
+
+Kirim:
+📷 Foto
+🎥 Video
+🎤 Voice
+📁 File
+📍 Lokasi
+
+💬 Chat AI Gemini
+🧠 Memory SQLite
+"""
     )
 
 # ==========================
-# CHAT
+# MEDIA
+# ==========================
+
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    photo = update.message.photo[-1]
+
+    save_media(
+        update.effective_user.id,
+        "photo",
+        photo.file_id,
+        update.message.caption or ""
+    )
+
+    await update.message.reply_text(
+        "📷 Foto berhasil disimpan."
+    )
+
+async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    video = update.message.video
+
+    save_media(
+        update.effective_user.id,
+        "video",
+        video.file_id,
+        update.message.caption or ""
+    )
+
+    await update.message.reply_text(
+        "🎥 Video berhasil disimpan."
+    )
+
+async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    voice = update.message.voice
+
+    save_media(
+        update.effective_user.id,
+        "voice",
+        voice.file_id,
+        ""
+    )
+
+    await update.message.reply_text(
+        "🎤 Voice berhasil disimpan."
+    )
+
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    doc = update.message.document
+
+    save_media(
+        update.effective_user.id,
+        "document",
+        doc.file_id,
+        doc.file_name
+    )
+
+    await update.message.reply_text(
+        f"📁 File diterima: {doc.file_name}"
+    )
+
+async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    lat = update.message.location.latitude
+    lon = update.message.location.longitude
+
+    save_memory(
+        update.effective_user.id,
+        "location",
+        f"{lat},{lon}"
+    )
+
+    await update.message.reply_text(
+        f"📍 Lokasi diterima\nhttps://maps.google.com/?q={lat},{lon}"
+    )
+
+# ==========================
+# CHAT AI
 # ==========================
 
 user_cooldown = {}
 
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user
-    uid = user.id
-
+    uid = update.effective_user.id
     text = update.message.text
 
-    # Anti spam
     now = time.time()
 
     if uid in user_cooldown:
@@ -195,7 +306,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = f"""
 {SYSTEM}
 
-Riwayat Percakapan:
+Riwayat:
 {history}
 
 User: {text}
@@ -227,11 +338,11 @@ User: {text}
 
     except Exception as e:
         await update.message.reply_text(
-            f"❌ Error:\n{str(e)}"
+            f"❌ Error: {str(e)}"
         )
 
 # ==========================
-# ERROR HANDLER
+# ERROR
 # ==========================
 
 async def error_handler(update, context):
@@ -247,6 +358,13 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("about", about))
 app.add_handler(CommandHandler("stats", stats))
 app.add_handler(CommandHandler("reset", reset))
+app.add_handler(CommandHandler("menu", menu))
+
+app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+app.add_handler(MessageHandler(filters.VIDEO, video_handler))
+app.add_handler(MessageHandler(filters.VOICE, voice_handler))
+app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
+app.add_handler(MessageHandler(filters.LOCATION, location_handler))
 
 app.add_handler(
     MessageHandler(
@@ -257,6 +375,6 @@ app.add_handler(
 
 app.add_error_handler(error_handler)
 
-print("✅ HusnanAi V4 Online")
+print("✅ HusnanAi V5 Online")
 
 app.run_polling()
